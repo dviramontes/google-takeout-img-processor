@@ -2,7 +2,6 @@ package main
 
 import (
 	"path/filepath"
-	"io/ioutil"
 	"fmt"
 	"log"
 	"os"
@@ -10,80 +9,64 @@ import (
 )
 
 func main()  {
-	fmt.Printf("Processing files beginning at: %s \n", os.Getenv("root"))
-	files, err := ioutil.ReadDir(os.Getenv("root"))
+	root := os.Getenv("root")
+	fmt.Printf("Processing files beginning at: %s \n", root)
+
+	list := walk(root)
+	fmt.Printf("Processed: %d jpgs\n", len(list))
+}
+
+func walk(root string) []string {
+	var list []string
+	dest := os.Getenv("dest")
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) == ".jpg" {
+			list = append(list, info.Name())
+			copyErr := Copy(path, dest, info.Name())
+			if copyErr != nil {
+				log.Panic(copyErr)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		log.Panic(err)
 	}
 
-	//dest := os.Getenv("dest")
-	//mkdirErr := os.Mkdir(dest, 0777)
-	//if mkdirErr != nil {
-	//	log.Println(mkdirErr)
-	//}
-
-
-	walk(files, os.Getenv("dest"))
+	return list
 }
 
-func isJPG(file os.FileInfo) bool {
-	ext := filepath.Ext(file.Name())
-	return ext == ".jpg"
-}
-
-func walk(files []os.FileInfo, dest string) {
-	root := os.Getenv("root")
-	var ls []os.FileInfo
-	for _, file := range files {
-		absPath := root + "/" + file.Name()
-		log.Println(absPath)
-		if file.IsDir() {
-			if isEmptyDir, _ := IsEmpty(absPath); isEmptyDir == true {
-				continue
-			}
-			ls, _ = ioutil.ReadDir(absPath)
-			log.Println(ls)
+func Copy(path, dest, filename string) (err error) {
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		fmt.Println(path)
+		from, fromErr := os.Open(path)
+		if fromErr != nil {
+			log.Panic(fromErr)
 		}
-	}
-	if len(ls) > 0 {
-		walk(ls, dest)
-	}
-}
+		defer from.Close()
 
-// Copy the src file to dest
-// Any existing file will be overwritten and will not copy file attributes.
-func Copy(src, dest string) error {
-	fmt.Println(src)
-	fmt.Println(dest)
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
+		to, toErr := os.Create(dest + "/" + filename)
 
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
+		if toErr != nil {
+			log.Panic(toErr)
+		}
+		defer to.Close()
 
-	_, err = io.Copy(out, in)
-	if err != nil {
-		return err
+		if _, copyErr := io.Copy(to, from); copyErr != nil {
+			log.Panic(copyErr)
+			to.Close()
+			return
+		}
+		syncErr := from.Sync()
+		if syncErr != nil {
+			log.Panic(syncErr)
+		}
+		return nil
+	} else {
+		return statErr
 	}
-	return out.Close()
-}
-
-func IsEmpty(name string) (bool, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	_, err = f.Readdirnames(1) // Or f.Readdir(1)
-	if err == io.EOF {
-		return true, nil
-	}
-	return false, err // Either not empty or error, suits both cases
 }
